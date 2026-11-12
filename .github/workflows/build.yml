@@ -1,6 +1,9 @@
 name: Build
 
-on: [push, pull_request]
+on: [push, pull_request, workflow_dispatch]
+
+permissions:
+  contents: write  # publishing a tag's release
 
 jobs:
   build:
@@ -15,17 +18,12 @@ jobs:
               HOST: 'i386-pc-linux',
               ARCHIVE_NAME: 'gcc-2.7.2-linux.tar.gz'
             }
+          # macOS: Apple Silicon only (macos-latest is an arm64 runner)
           - {
-              OS: 'macos-13',
-              CFLAGS: '-DDARWIN -std=gnu89 -Wno-return-type -Wno-error -Wno-implicit-function-declaration -Wno-int-conversion',
-              HOST: 'i386-apple-darwin',
-              ARCHIVE_NAME: 'gcc-2.7.2-mac.tar.gz'
-            }
-          - {
-              OS: 'macos-14',
+              OS: 'macos-latest',
               CFLAGS: '-DDARWIN -std=gnu89 -Wno-return-type -Wno-error -Wno-implicit-function-declaration -Wno-int-conversion',
               HOST: 'arm-apple-darwin',
-              ARCHIVE_NAME: 'gcc-2.7.2-mac-arm.tar.gz'  
+              ARCHIVE_NAME: 'gcc-2.7.2-mac-arm64.tar.gz'
             }
 
     name: Building gcc for ${{ matrix.TARGET.OS }}
@@ -57,6 +55,16 @@ jobs:
           file cc1
           ./cc1 test.c
 
+      - name: Float and double constants come out right
+        # A 64-bit host once turned them into zeros or garbage (the "64-bit fix" commits): check the words
+        shell: bash
+        run: |
+          printf 'double d = 1.5;\nfloat k = 3.0f;\n' > consts.c
+          ./cc1 -quiet -O2 -G0 -mips3 consts.c -o consts.s
+          cat consts.s
+          grep -Eq '\.word[[:space:]]+0x3ff80000' consts.s
+          grep -Eq '\.word[[:space:]]+0x40400000' consts.s
+
       - name: Create release archive
         shell: bash
         run: |
@@ -64,14 +72,14 @@ jobs:
           tar -czf ${{ matrix.TARGET.ARCHIVE_NAME }} gcc cc1 cc1plus cpp cccp g++
 
       - name: Upload archive
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: gcc-2.7.2-${{ matrix.TARGET.OS }}
           path: |
             ${{ matrix.TARGET.ARCHIVE_NAME }}
 
       - name: Publish release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: ${{ matrix.TARGET.ARCHIVE_NAME }}
